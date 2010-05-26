@@ -2,18 +2,7 @@
 %% -*- erlang -*-
 %%! -smp enable -sname exago_cmdline -pa $EXAGO_PATH
 
-main(["erl"]) ->
-    audit_server:start(),
-    start_shell(),
-    wait_for_exit(),
-    audit_server:stop();
-
-main(["gui"]) ->
-    wx_ui:start(),
-    start_shell(),
-    wait_for_exit();
-
-main(["run", Module, Fun | Args]) ->
+main([Module, Fun | Args]) ->
     ConfRecord = erlang:apply(list_to_atom(Module), list_to_atom(Fun), Args),
     Pid = self(),
     spawn_link(fun() -> 
@@ -21,12 +10,6 @@ audit:run(ConfRecord),
 Pid ! {'EXIT', self(), ok}
 end),
     wait_for_exit();
-
-main(["run", Filename]) ->
-    audit_server:start(),
-    audit_server:load(Filename),
-    audit_server:run(), 
-    ok;
 
 main(_) ->
     usage().
@@ -44,6 +27,6 @@ wait_for_exit() ->
     
 usage() ->
     io:format("usage:\n"),
-    io:format("  exago erl | gui | run Module Fun [Arg1 Arg2 ...] | run Filename\n"),
+    io:format("  exago Module Fun [Arg1 Arg2 ...]\n"),
     halt(1).
 
