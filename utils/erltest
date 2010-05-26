@@ -1,0 +1,217 @@
+#!/usr/bin/env escript
+
+main([_|_] = Args) ->
+    case catch parse_args(Args, "./cover_report", []) of
+        {'EXIT', _} ->
+            usage();
+        {Test, Outdir, Cover} ->
+            run(Test, Outdir, Cover)
+    end;
+main(_) ->
+    usage().
+
+parse_args(["-pa", Bindir | Tail], Outdir, Cover) ->
+    code:add_patha(Bindir),
+    parse_args(Tail, Outdir, Cover);
+parse_args(["-outdir", Outdir | Tail], _, Cover) ->
+    parse_args(Tail, Outdir, Cover);
+parse_args(["-cover", App | Tail], Outdir, Cover) ->
+    parse_args(Tail, Outdir, [App | Cover]);
+parse_args([Test], Outdir, Cover) ->
+    {Test, Outdir, Cover}.
+
+usage() ->
+    io:format(
+      "Usage: ~s TestSuiteDir ReportDir [Application]~n",
+      [escript:script_name()]
+     ).
+
+run(Test, Outdir, CoverApplications) ->
+    error_logger:tty(false),
+    case filelib:ensure_dir(Outdir++"/index.html") of
+        ok ->
+            ok;
+        {error, Reason} ->
+            io:format("Can't create ~s: ~p~n", [Outdir, Reason]),
+            halt(1)
+    end,
+    code:add_path(Test),
+    ok = application:start(tools),
+    Modules = lists:concat(lists:map(
+                             fun(Application) ->
+                                     Result = cover:compile_directory(Application,
+                                                [{i, filename:join(Application, "../include")}]),
+                                     lists:map(fun({ok, M}) -> M end, Result)
+                             end, CoverApplications)),
+
+    TestModules =
+        [list_to_atom(filename:basename(F, ".erl")) ||
+            F <- filelib:wildcard(filename:join(Test, "*.erl"))],
+    EUnitResult = eunit:test(TestModules),
+    EqcResult =
+        case os:getenv("DONT_USE_EQC") of
+            false ->
+                case code:load_file(eqc) of
+                    {error, R} ->
+                        io:format("Not running eqc tests: ~p.~n", [R]),
+                        [];
+                    {module, _} -> run_eqc(TestModules)
+                end;
+            _ ->
+                io:format("Not running eqc tests: DONT_USE_EQC set.~n"),
+                []
+        end,
+
+    case {EUnitResult, EqcResult} of
+        {ok, []} ->
+            TotalPercentage = html_report(Outdir, Modules),
+            io:format("All tests passed.  ~B% line coverage.~n", [TotalPercentage]),
+
+            %% Taken from http://idlingspace.com/game/perfect_lemmings/lemmingology_mathe/
+            Needed = 70,
+            Rescued = TotalPercentage,
+            Msg =
+                if Rescued == 0 ->
+                        "ROCK BOTTOM! I hope for your sake that you nuked that level.";
+                   Rescued < (Needed div 2) ->
+                        "Better rethink your strategy before you try this level again!";
+                   Rescued < (Needed - 5) ->
+                        "A little more practice on this level is definitely recommended.";
+                   Rescued < (Needed - 1) ->
+                        "You got pretty close that time. Now try again for that few percent extra.";
+                   Rescued == (Needed - 1) ->
+                        "OH NO, So near and yet so far (teehee) Maybe this time.....";
+                   Rescued == Needed ->
+                        "SPOT ON. You can't get much closer than that. Let's try the next....";
+                   Rescued < (Needed + 20), Rescued < 100 ->
+                        "That level seemed no problem to you on that attempt. Onto the next....";
+                   Rescued < 100 ->
+                        "You totally stormed that level! Let's see if you can storm the next...";
+                   Rescued == 100 ->
+                        "Superb! You rescued every lemming on that level. Can you do it again....?"
+                end,
+            io:format("~s~n", [Msg]);
+        {_, _} ->
+            %% eunit prints enough information about test failures.
+            %% eqc doesn't print the module name; we print some info
+            %% ourselves for completeness.
+            print_eqc_failures(EqcResult),
+
+            TotalPercentage = html_report(Outdir, Modules),
+            io:format("Some tests failed.  ~B% line coverage.~n", [TotalPercentage]),
+            halt(2)
+    end.
+
+run_eqc(TestModules) ->
+    io:format("eqc from ~p~n", [code:which(eqc)]),
+    run_eqc(TestModules, 200).
+
+run_eqc(_, 0) ->
+    io:format("Error: couldn't start EQC.~n"),
+    halt(2);
+
+run_eqc(TestModules, N) ->
+    case catch eqc:start(false) of
+        Pid when is_pid(Pid) ->
+            R = lists:concat(lists:map(fun (Module) ->
+                                               case eqc:module(Module) of
+                                                   [] ->
+                                                       [];
+                                                   Failed ->
+                                                       [{Module, Failed}]
+                                               end
+                                       end, TestModules)),
+            eqc:stop(),
+            R;
+        {'EXIT', E} ->
+            io:format("Couldn't start EQC: ~p~nSleeping and retrying...~n", [E]),
+            timer:sleep(60000),
+            run_eqc(TestModules, N-1)
+    end.
+
+print_eqc_failures([]) ->
+    ok;
+print_eqc_failures(Failed) ->
+    io:format("Quickcheck tests failed:~n~p~n", [Failed]).
+
+    
+%%%----------------------------------------------------------------
+
+%% @spec html_report(Path::string(), Modules) -> TotalPercentage
+%% Modules = [Module::atom()] 
+%% @doc
+%% Print HTML report.
+%% Outputs HTML reports (with line level coverage information) to
+%% <code>Path</code>. Every module in <code>Modules</code> will have its
+%% own file, and an index file with coverage in percentage will also be
+%% created.
+%% <p> Returns total percentage of lines covered.
+%% @end
+html_report(Path, Modules) ->
+    Results = lists:map(fun(Module) ->
+				case cover:analyse(Module, module) of
+                                    {ok, Result}    -> Result;
+                                    {error, Reason} -> exit({invalid_module, Reason})
+				end
+                        end, Modules),
+    case filelib:ensure_dir(filename:join(Path, "index.html")) of
+        ok              -> ok;
+        {error, Reason} -> exit({invalid_dir, Reason})
+    end,
+    Files = lists:map(fun(Module) ->
+                              File = filename:join(Path, ["mod_", Module, ".html"]),
+                              {ok, File} = cover:analyse_to_file(Module, File, [html]),
+                              filename:basename(File)
+                      end, Modules),
+    output_index(Path, lists:zip3(Modules, Files, percentage_per_file(Results))),
+    percentage_total(Results).
+
+percentage_total(Results) ->
+    {Covered, Total} =
+        lists:foldl(
+          fun({_Module, {C, NC}}, {Covered, Total}) ->
+                  {Covered + C, Total + C + NC}
+          end, {0, 0}, Results),
+    case Total of
+        0 -> 0;
+        _ -> round(100 * Covered / Total)
+    end.
+
+percentage_per_file(Results) ->
+    lists:map(fun
+                ({_, {0, 0}}) -> 100;
+                ({_Module, {Covered, NotCovered}}) ->
+                      Total = Covered + NotCovered,
+                      round(100 * Covered / Total)
+              end, Results).
+
+output_index(Path, Info) ->
+    IndexFile = filename:join(Path, "index.html"),
+    IoDevice = case file:open(IndexFile, [write]) of
+                   {ok, IoD}       -> IoD;
+                   {error, Reason} -> exit({invalid_file, Reason})
+               end,
+    output_header(IoDevice),
+    lists:foreach(fun({Module, File, Percentage}) ->
+                          io:format(IoDevice, "~s~n", [
+						[
+							"<li><a href=\"",
+							File,
+							"\">",
+							atom_to_list(Module),
+							"</a> Covered: ",
+							integer_to_list(Percentage),
+							"%",
+							"</a>"
+						]
+                                               ])
+                  end, lists:keysort(1, Info)),
+    output_footer(IoDevice),
+    file:close(IoDevice),
+    IndexFile.
+
+output_header(IoDevice) ->
+    io:format(IoDevice, "<html>~n<head></head><body>", []).
+
+output_footer(IoDevice) ->
+    io:format(IoDevice, "</body>~n</html>~n", []).
