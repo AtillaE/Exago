@@ -1,0 +1,1 @@
+/usr/local/lib/erlang/bin/start_clean.boot

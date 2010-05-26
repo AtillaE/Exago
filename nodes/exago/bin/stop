@@ -1,0 +1,8 @@
+#!/usr/bin/env escript
+
+main(_) ->
+    Host = os:cmd("hostname -s") -- "\n",
+    net_kernel:start([list_to_atom("shutdown@"++Host), shortnames]),
+    Name = "exago",
+    Node = list_to_atom(Name++"@"++Host),
+    rpc:call(Node, init, stop, []).

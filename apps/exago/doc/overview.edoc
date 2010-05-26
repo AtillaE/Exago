@@ -1,0 +1,94 @@
+
+@author Aniko Nagyne Vig <aniko.nagyne.vig@erlang-solutions.com>
+@author Atilla Erdodi <atilla.erdodi@erlang-solutions.com>
+@author Bartlomiej Puzon <bartlomiej.puzon@erlang-solutions.com>
+@author Hans Svensson
+
+@doc <p>Exago is an audit log monitoring tool.
+It allows developers and support engineers to check properties and find bug in a system just by analysing the log files.
+The user needs to know the architecture of the target system and have access to the log files but not to the live system itself.
+Relations between the fields can be specified as the tool will resolve them on parsing.
+Exago aggregates and abstracts the log entries into abstract transactions and then sessions.
+It tests properties by checking these abstract events against a Finite State Machine
+</p>
+
+<p></p>
+<ul>
+
+<li><h4>Specifying the files</h4>
+Files have to be specified as wildcards.</li>
+
+<li><h4>Specifying the fields</h4>
+
+Exago supports CSV log files.
+Fields must be specified by a list of integers (where each number indicates a column in the log file) and references.
+Mappings are used in the format: <pre>{MapId::atom(), FromFields::field_def()}</pre>where 'MapId' is the mapping id atom and 
+'FromFields' is the specification of the fields to which values the mapping will be applied.
+
+<ul>
+<li><b>Timestamp:</b> The time when the entry was logged.</li>
+
+<li><b>Transaction id:</b> Transaction in our terminology means a series of events that denotes a state transition.
+ Log entries with the same transaction id will be aggregated and abstracted into one transaction.
+ When no transacaction id is present, no transaction abstraction will be done
+ and a log entry will be equivalent to a transaction.</li>
+<li><b>Session id:</b> Session means a series of events groupped together for analysis. 
+Transactions with the same session id will be aggregated and abstracted into a session.
+Each session checked separately against the state machine.</li>
+
+<li><b>Abstract value:</b> Any value in the log entry that will be used during the processing to determine the state transition.</li>
+
+<li><b>Foreign keys:</b> Have to be provided in the format: <pre>{MapId::atom(), FromFields::field_def(), ToFields::field_def()}</pre>
+On processing Exago will apply the defined mappings to the fields where they are referenced, thus resolving relations between log entries.</li>
+
+</ul>
+
+</li>
+
+
+<li><h4>Abstraction and validation functions</h4>
+
+One or two functions have to be specified depending whether transactions abstraction is necessary or not.
+The result of the transaction abstraction function will be the input for the session abstraction fcuntion.
+Examples can be found in the examples.erl file.
+</li>
+
+<li><h4>State machine</h4>
+The state machine have to be specified as a Labelled Transition System - a list of states and a list of transitions.
+</li>
+</ul>
+
+
+<h2>Licence</h2>
+
+<p>
+Copyright (c) 2009, 2010 Erlang Solutions formerly Erlang Training and Consulting 
+All rights reserved.
+</p>
+
+
+<p>
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+<ul> 
+<li> Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer. </li>
+<li> Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution. </li> 
+<li> Neither the name of the Erlang Solutions nor the names of its
+contributors may be used to endorse or promote products 
+derived from this software without specific prior written permission. </li>
+</ul></p>
+
+<p>THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS
+BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.</p>
