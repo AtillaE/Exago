@@ -9,55 +9,233 @@ It allows developers and support engineers to check properties and find bug in a
 The user needs to know the architecture of the target system and have access to the log files but not to the live system itself.
 Relations between the fields can be specified as the tool will resolve them on parsing.
 Exago aggregates and abstracts the log entries into abstract transactions and then sessions.
-It tests properties by checking these abstract events against a Finite State Machine
+It tests properties by checking these abstract events against a Finite State Machine.
 </p>
 
 <p></p>
-<ul>
 
-<li><h4>Specifying the files</h4>
-Files have to be specified as wildcards.</li>
-
-<li><h4>Specifying the fields</h4>
-
-Exago supports CSV log files.
-Fields must be specified by a list of integers (where each number indicates a column in the log file) and references.
-Mappings are used in the format: <pre>{MapId::atom(), FromFields::field_def()}</pre>where 'MapId' is the mapping id atom and 
-'FromFields' is the specification of the fields to which values the mapping will be applied.
+<h4>Basic properties</h4>
 
 <ul>
-<li><b>Timestamp:</b> The time when the entry was logged.</li>
 
-<li><b>Transaction id:</b> Transaction in our terminology means a series of events that denotes a state transition.
+<li>
+<pre>
+{name, string()}
+</pre>
+
+The name of the configuration
+</li>
+
+<li>
+<pre>
+{base_dir, string()}
+</pre>
+
+The base directory under where the audit log files are located.
+</li>
+
+<li>
+<pre>
+{files, Files}
+</pre>
+
+The list of specifications of log files to process.
+</li>
+
+<li>
+<pre>
+{trans_abstr, function()}
+</pre>
+                  
+The transaction abstraction function. Takes a list of events and returns one or more abstracted events.
+
+</li>
+
+<li>
+<pre>
+{sess_abstr, function()}
+</pre>
+
+The session abstraction function. Takes a list of events and returns a list of abstracted events.
+
+</li>
+
+<li>
+<pre>
+{specification, {statem, Spec}}
+</pre>
+
+The specification of the system to check the abstract events against.
+
+</li>
+
+</ul>
+
+<h4>Properties for file specifications</h4>
+
+<ul>
+
+<li>
+<pre>
+{wildcard, string()}
+</pre>
+
+The wildcard for audit log files. Files matching the wildcard will be read and parsed according to the following options.
+</li>
+
+<li>
+<pre>
+{parseopts, Options}
+</pre>
+
+The list of parse options to be passed to the parse function.
+Currently the only possible option is {separator, string()} for defining the separator character(s) of the CSV file if it is other than comma.
+
+</li>
+
+<li>
+<pre>
+{ts_format, rfc | string() | function()}
+</pre>
+
+The format of the timestamp. The default value is rfc which uses the Erlang function
+httpd_util:convert_request_date/1 to parse the timestamp. Alternatively a custom parser function or a custom format string can be given.
+</li>
+
+<li>
+<pre>
+{timestamp, field_def()}
+</pre>
+
+The fields which denote the timestamp in the parsed tuple.
+See Field Definitions for syntax details.
+</li>
+
+<li>
+<pre>
+{abstract_value, field_def()}
+</pre>
+
+The abstract value to be extracted from the parsed tuple and passed to the first abstraction function.
+See Field Definitions for syntax details.
+</li>
+
+<li>
+<pre>
+{session_id, field_def()}
+</pre>
+
+The fields which contain the session id in the parsed tuple.
+See Field Definitions for syntax details.
+Session means a series of events groupped together for analysis.
+Transactions with the same session id will be aggregated and abstracted into a session.
+Each session checked separately against the state machine.
+</li>
+
+<li>
+<pre>
+{transaction_id, field_def()}
+</pre>
+
+The fields which contain the transaction id in the parsed tuple.
+See Field Definitions for syntax details.
+Transaction in our terminology means a series of events that denotes a state transition.
  Log entries with the same transaction id will be aggregated and abstracted into one transaction.
  When no transacaction id is present, no transaction abstraction will be done
- and a log entry will be equivalent to a transaction.</li>
-<li><b>Session id:</b> Session means a series of events groupped together for analysis. 
-Transactions with the same session id will be aggregated and abstracted into a session.
-Each session checked separately against the state machine.</li>
+ and a log entry will be equivalent to a transaction.
+</li>
 
-<li><b>Abstract value:</b> Any value in the log entry that will be used during the processing to determine the state transition.</li>
-
-<li><b>Foreign keys:</b> Have to be provided in the format: <pre>{MapId::atom(), FromFields::field_def(), ToFields::field_def()}</pre>
-On processing Exago will apply the defined mappings to the fields where they are referenced, thus resolving relations between log entries.</li>
+<li>
+<pre>
+{mappings, [{atom(), field_def(), field_def()}]}
+</pre>
+The list of mappings defined by this file.
+</li>
 
 </ul>
 
-</li>
 
+<h4>Field Definitions</h4>
+Fields can be defined using the following recursive syntax:
+<pre>
+field_def() ::= Pos::integer() | {MapId::atom(), field_def()} | [field_def]
+</pre>
 
-<li><h4>Abstraction and validation functions</h4>
-
-One or two functions have to be specified depending whether transactions abstraction is necessary or not.
-The result of the transaction abstraction function will be the input for the session abstraction fcuntion.
-Examples can be found in the examples.erl file.
-</li>
-
-<li><h4>State machine</h4>
-The state machine have to be specified as a Labelled Transition System - a list of states and a list of transitions.
-</li>
+<ul>
+<li> an integer number referring to the position in the parsed tuple is a field definition
+(numbering  starts with 1, 2, 3 ...) </li>
+<li> a mapping that takes a field definition as parameter is a field definition </li>
+<li> a list of fields definitions is a field definition </li>
 </ul>
 
+Examples are:
+<pre>
+2
+[5, 6]
+[1, {f, [6, 5]}]
+{req, 6}
+{m, [{n, [5, 6]}, 2, 4]}
+</pre>
+
+<h4>FSM specification</h4>
+
+The state machine is specified as a Labelled Transition System.
+The following options are used for the specification:
+
+<ul>
+
+<li><pre>
+{states, [StateNum::integer() | 
+          {StateNum::integer(), StateName::string()}]}
+</pre>
+
+Defines the possible states. If no name is provided for a state, the string State_N will be
+used in the report.
+</li>
+
+<li><pre>
+{trans, [{From::integer(), To::Integer, Pattern} | 
+         {From::integer(), To::Integer, Pattern, TimeConstr}]}
+</pre>
+
+Defines the possible transitions between the abstract states. From and To are state numbers,
+Pattern is a term an event should match. Pattern matching for abstract events is limited:
+matching is possible for "type constructs" (eg. tuple, list) and the atom '_' can be used,
+but no symbolic variable binding is possible.
+
+Time constraints can also be defined here using the syntax {Rel::atom(), Time::integer()}
+where Rel can be lt, gt, leq, geq denoting the relations
+<i>Less Than</i>, <i>Greater Than</i>, <i>Less or Equal</i>, <i>Greater or Equal</i> respectively.
+</li>
+
+<li><pre>
+{init_st, StateNum::integer()}
+</pre>
+
+Specifies the initial state of the state machine. Default is 0.
+
+</li>
+
+<li><pre>
+{terminal, [StateNum::integer()]}
+</pre>
+
+Specifies the valid terminal states. A session ending in any other states will be reported as a failed session.
+
+</li>
+
+
+<li><pre>
+{good, [StateNum::integer()]}
+</pre>
+
+Specifies the <i>good</i> terminal states. Good terminal states are a subset of valid terminal states.
+If a session ends in a terminal state which is not indicated as good terminal state, it will also be reported
+as a failed session. In this way it is possible to look for specific classes of system failures by explicitly
+providing the possible faulty terminal states.
+</li>
+
+</ul>
 
 <h2>Licence</h2>
 
