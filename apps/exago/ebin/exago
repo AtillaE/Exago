@@ -6,7 +6,7 @@ main([Module, Fun | Args]) ->
     ConfRecord = erlang:apply(list_to_atom(Module), list_to_atom(Fun), Args),
     Pid = self(),
     spawn_link(fun() -> 
-audit:run(ConfRecord),
+exago:run(ConfRecord),
 Pid ! {'EXIT', self(), ok}
 end),
     wait_for_exit();
