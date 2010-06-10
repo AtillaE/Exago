@@ -58,58 +58,66 @@ run(Conf) ->
 	    io:format("done. (~p)\n", [TSort]),
 	    
 	    io:format("Reading and resolving log entries..."),
-	    {TRead, {ok, {Tbl, Tbl2}}} =
-		timer:tc(exago_reader, read_files, [SortedConf]),
-	    io:format("done. (~p)\n", [TRead]),
 	    
-	    io:format("Structuring transactions..."),
-	    TrAbstrFun = exago_conf:get_trans_abstrfun(SortedConf),
-	    {TStructTrans, {ok, Tbl2}} = 
-		timer:tc(exago_abstr, abstract,
+	    case (catch timer:tc(exago_reader, read_files, [SortedConf])) of
+		{TRead, {ok, {Tbl, Tbl2}}} ->
+		    io:format("done. (~p)\n", [TRead]),
+		    
+		    io:format("Structuring transactions..."),
+		    TrAbstrFun = exago_conf:get_trans_abstrfun(SortedConf),
+		    {TStructTrans, {ok, Tbl2}} = 
+			timer:tc(exago_abstr, abstract,
 			 [Tbl, Tbl2, TrAbstrFun, session_id]),
-	    io:format("done. (~p)\n", [TStructTrans]),
-	    
-	    io:format("Structuring sessions..."),
-	    SessAbstrFun = exago_conf:get_sess_abstrfun(SortedConf),
-	    AbstrSessTbl = ets:new(abstr_sess_tbl, [duplicate_bag, public]),
-	    {TStructSess, {ok, AbstrSessTbl}} =
-		timer:tc(exago_abstr, abstract,
-			 [Tbl2, AbstrSessTbl, SessAbstrFun]),
-	    io:format("done. (~p)\n", [TStructSess]),
-	    
-	    case exago_conf:get_spec(SortedConf) of
-		undefined ->
-		    exago_events:e_stop_report(),
-		    io:format("No abstract model of the system present.\n"),
-		    {no_spec, {Tbl, Tbl2, AbstrSessTbl}};
-		Specification ->		    
-		    io:format("Checking against the abstract model..."),
-		    {TCheck, ResultTbl} = case Specification of
-					      {CallBackMod, Spec} ->
-						  timer:tc(CallBackMod, check,
- 							   [AbstrSessTbl,Spec]);
-					      Spec ->
-						  timer:tc(statem, check,
-							   [AbstrSessTbl,Spec])
-					  end,
-		    io:format("done. (~p)\n", [TCheck]),
+		    io:format("done. (~p)\n", [TStructTrans]),
+		    
+		    io:format("Structuring sessions..."),
+		    SessAbstrFun = exago_conf:get_sess_abstrfun(SortedConf),
+		    AbstrSessTbl = ets:new(abstr_sess_tbl, [duplicate_bag, public]),
+		    {TStructSess, {ok, AbstrSessTbl}} =
+			timer:tc(exago_abstr, abstract,
+				 [Tbl2, AbstrSessTbl, SessAbstrFun]),
+		    io:format("done. (~p)\n", [TStructSess]),
+		    
+		    case exago_conf:get_spec(SortedConf) of
+			undefined ->
+			    exago_events:e_stop_report(),
+			    io:format("No abstract model of the system present.\n"),
+			    {no_spec, {Tbl, Tbl2, AbstrSessTbl}};
+			Specification ->		    
+			    io:format("Checking against the abstract model..."),
+			    {TCheck, ResultTbl} = case Specification of
+						      {CallBackMod, Spec} ->
+							  timer:tc(CallBackMod, check,
+								   [AbstrSessTbl,Spec]);
+						      Spec ->
+							  timer:tc(statem, check,
+								   [AbstrSessTbl,Spec])
+						  end,
+			    io:format("done. (~p)\n", [TCheck]),
  		    
-		    exago_events:e_section("Failing sessions:"),
-		    io:format("Generating session reports and cleaning up..."),
-		    gen_sess_reports(ResultTbl, AbstrSessTbl, Spec),
-		    ets:delete(Tbl),
-		    ets:delete(Tbl2),
-		    ets:delete(AbstrSessTbl),
+			    exago_events:e_section("Failing sessions:"),
+			    io:format("Generating session reports and cleaning up..."),
+			    gen_sess_reports(ResultTbl, AbstrSessTbl, Spec),
+			    ets:delete(Tbl),
+			    ets:delete(Tbl2),
+			    ets:delete(AbstrSessTbl),
+			    exago_events:e_stop_report(),
+			    io:format("done.\n"),			    
+			    {ok, ResultTbl}
+		    end;
+		{_TRead, Error} ->
+		    io:format("fail!\n"),
+		    io:format(" See report for details!\n"),
 		    exago_events:e_stop_report(),
-		    io:format("done.\n"),
-
-		    {ok, ResultTbl}
+		    Error	    
 	    end;
 	{false, Details} ->
 	    io:format("fail!\n"),
-	    {invalid_conf, Details};
+	    io:format(" Details: ~p\n", [Details]),
+	    {invalid_conf, Details};	
 	Error ->
 	    io:format("fail!\n"),
+	    io:format(" Reason: ~p\n", [Error]),
 	    {invalid_conf, Error}
     end.
 

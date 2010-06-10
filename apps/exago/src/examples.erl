@@ -151,6 +151,9 @@ conf_etc_sms(FilePre) ->
 	       {abstract_value, [filename]}],
 	      
 	      [{wildcard, FilePre ++ "ReqAck.log"},
+	       {parse_fun, fun(Str, _Opts) -> % testing the custom parser function
+				   list_to_tuple(string:tokens(Str, ","))
+			   end},
 	       {session_id, [3]},
 	       {timestamp, [2]},
 	       {abstract_value, [filename]}],

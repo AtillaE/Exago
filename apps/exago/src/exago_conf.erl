@@ -117,7 +117,8 @@ validate(Conf) when is_list(Conf) ->
     end.
 
 validate_filespec(FileSpec) ->
-    ValidKeys = [wildcard, delimiter, ts_format, filter, mappings, offset,
+    ValidKeys = [wildcard, parse_fun, parse_opts, delimiter,
+		 ts_format, filter, mappings, offset,
 		 transaction_id, session_id, timestamp, abstract_value],
     PropValidKeys = lists:foldl(fun(Key, Res) ->
 					Res andalso lists:member(Key, ValidKeys)
@@ -202,7 +203,7 @@ tag_fileconfs(FileConfList) ->
 -spec pre(list()) -> list(atom()).
 pre(FileConf) ->
     lists:flatten(
-      [pre2(X) || X <- [proplists:get_all_values(trans_id, FileConf),
+      [pre2(X) || X <- [proplists:get_all_values(transaction_id, FileConf),
 			proplists:get_all_values(session_id, FileConf),
 			proplists:get_all_values(timestamp, FileConf),
 			proplists:get_all_values(abstract_value, FileConf),

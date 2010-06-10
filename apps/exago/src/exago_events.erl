@@ -49,6 +49,7 @@
 	 add_handler/2,
 	 e_nondet_map/2,
 	 e_undef_map/2,
+	 e_parsefun_error/2,
 	 e_ts_parse_error/1,
 	 e_abstrfun_error/2,
 	 e_info/1,
@@ -68,7 +69,7 @@ start_link() ->
     exago_event_counter:start_link(),
     gen_event:start_link({local, ?SERVER}).
 
-%% @spec add_handler(Module::atom(), [Args::term()]) -> ok | {'EXIT',Reason} | term()
+%% @spec add_handler(Module::atom(),[Args::term()]) -> ok|{'EXIT',Reason}|term()
 %% @doc Adds an event handler
 -spec add_handler(atom(), [term()]) -> ok | {'EXIT',term()} | term().
 add_handler(Module, Args) ->
@@ -116,6 +117,11 @@ e_nondet_map(Id, Pairs) ->
 -spec e_undef_map(atom(), term()) -> term().
 e_undef_map(Id, FromValue) ->
     send({warning, {undef_map, Id, FromValue}}).
+
+%% @doc custom parser function threw exception
+-spec e_parsefun_error(atom(), term()) -> term().
+e_parsefun_error(Class, Error) ->
+    send({warning, {parsefun_error, Class, Error}}).
 
 %% @doc timstamp parse error
 -spec e_ts_parse_error(string()) -> term().

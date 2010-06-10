@@ -47,36 +47,37 @@
 %% @doc Reads and parses the log files
 -spec read_files(list()) -> tid().
 read_files(Conf) ->
-%% ETS table to store transactions to abstract, and temporary foreing keys
+    % ETS table to store events to abstract, and temporary mapping information
     Tbl  = ets:new(abstr_event_tbl, [duplicate_bag, public]),
     Tbl2 = ets:new(abstr_event_tbl_2, [duplicate_bag, public]),
     Files = exago_conf:get_files(Conf),
+    
     [exago_events:e_info(lists:flatten(io_lib:format("  ~p", [X])))
      || X <- Files],
     lists:foreach(
-      fun({FileName, FileProplist}) ->
-	      read_csv_file(Tbl, Tbl2, FileName, FileProplist)
+      fun({FileName, FileDetailsProplist}) ->
+	      read_file(Tbl, Tbl2, FileName, FileDetailsProplist)
       end, exago_conf:get_files(Conf)),
     ets:match_delete(Tbl, {{'$mapping', '_', '_'}, '_'}),
     {ok, {Tbl, Tbl2}}.
 
-%% @spec read_csv_file(Tbl::tid(), Tbl2::tid(),
-%%                     File::string(), FileDetails::list()) -> TrTbl
+%% @spec read_file(Tbl::tid(), Tbl2::tid(), File::string(),
+%%                 FileDetails::list()) -> TrTbl
 %% @doc Reads and parses a log file
--spec read_csv_file(tid(), tid(), string(), list()) -> tid().
-read_csv_file(Tbl, Tbl2, FileName, FileDetails) ->
+-spec read_file(tid(), tid(), string(), list()) -> {tid(), tid()}.
+read_file(Tbl, Tbl2, FileName, FileDetails) ->
+    ParseFun = proplists:get_value(parse_fun, FileDetails, csv),
     ParseOpts = proplists:get_value(parse_opts, FileDetails),
-    Delimiter = proplists:get_value(delimiter, ParseOpts),
-    Data = parse_file(FileName, Delimiter),
+    Data = parse_file(FileName, ParseFun, ParseOpts),
     build_events_tbl(Tbl, Tbl2, FileName, FileDetails, Data).
 
 %% @spec build_events_tbl(Tbl::tid(), Tbl2::tid(),
 %%                        FileName::string(), FileDetails::list(),
-%%                        Data::list(tuple())) -> tid()
+%%                        Data::list(tuple())) -> {Tbl::tid(), Tbl2::tid()}
 %% @doc Builds the events table, extracts the specified values
 %%      and resolves the relations. Events with transaction id
 %%      will be put into the first table, events w/o into the second
--spec build_events_tbl(tid(), tid(), string(), list(), list(tuple())) -> tid().
+-spec build_events_tbl(tid(), tid(), string(), list(), list(tuple())) -> {tid(), tid()}.
 build_events_tbl(Tbl, Tbl2, _FileName, _FileDetails, []) ->
     {Tbl, Tbl2};
 build_events_tbl(Tbl, Tbl2, FileName, FileDetails, [Tuple | Data]) ->
@@ -286,24 +287,35 @@ eval_xor([Cond | Rest],Tuple) ->
 init(List) ->
     lists:reverse(tl(lists:reverse(List))).
 
-%% @spec parse_file(File::string(),Delimiter::string()) -> Data::list(tuple())
+%% @spec parse_file(File::string(), ParseFun::list(), ParseOpts::list()) ->
+%%                      Data::list(tuple())
 %% @doc Read and parse a CSV-logfile
--spec parse_file(string(), string()) -> list(tuple()).
-parse_file(File, Delimiter) ->
+-spec parse_file(string(), function(), list()) -> list(tuple()).
+parse_file(File, ParseFun, ParseOpts) ->
     {ok, IoDev} = file:open(File, [read]),
-    Data = parse_file(IoDev, file:read_line(IoDev), Delimiter),
+    Data = parse_file(IoDev, file:read_line(IoDev), ParseFun, ParseOpts),
     file:close(IoDev),
     Data.
 
-parse_file(_IoDev, eof, _Delimiter) ->
+parse_file(_IoDev, eof, _ParseFun, _ParseOpts) ->
     [];
-parse_file(IoDev, {ok, Str}, Delimiter) ->
-    [parse_str(init(Str), Delimiter) |
-     parse_file(IoDev, file:read_line(IoDev), Delimiter)].
+parse_file(IoDev, {ok, Str}, ParseFun, ParseOpts) ->
+    [parse_str(init(Str), ParseFun, ParseOpts) |
+     parse_file(IoDev, file:read_line(IoDev), ParseFun, ParseOpts)].
 
-parse_str(Str,Delimiter) ->
+parse_str(Str, csv, ParseOpts) ->
+    Delimiter = proplists:get_value(delimiter, ParseOpts),
     SStr = tokens(Str,Delimiter),
-    list_to_tuple(SStr).
+    list_to_tuple(SStr);
+parse_str(Str, ParseFun, ParseOpts) ->
+    try ParseFun(Str, ParseOpts) of
+	Result ->
+	    Result
+    catch
+	Class:Error ->
+	    exago_events:e_parsefun_error(Class, Error),
+	    throw({parsefun_error, Class, Error})
+    end.
 
 %% @spec tokens(String::string(), Seperators::string()) ->
 %%           ListOfStrings::list(string())

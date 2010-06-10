@@ -54,6 +54,7 @@
 	"<HEAD><TITLE>" ++ Title ++ "</TITLE></HEAD>"
 	"<BODY>").
 -define(HTML_FOOTER, "</BODY></HTML>").
+-define(ERROR(Msg), "<B>ERROR:</B>" ++ Msg ++ "<BR>").
 -define(WARNING(Msg), "<B>Warning:</B> " ++ Msg ++ "<BR>").
 -define(HEADING(Msg), "<H3>" ++ Msg ++ "</H3><BR>\n").
 
@@ -185,6 +186,13 @@ handle_event({warning, {nondet_map, Id, Pairs}}, State) ->
 handle_event({warning, {undef_map, Id, FromValue}}, State) ->
     write(State, ?WARNING(to_str("Mapping ~p not defined on ~p ~n",
 				 [Id, FromValue])), []),
+    {ok, State};
+
+handle_event({warning, {parsefun_error, Class, Error}}, State) ->
+    write(State, ?ERROR(to_str("Custom parser function threw exception<br>~n "
+			       "Class: <pre>~p</pre> ~n "
+			       "Exception: <pre>~p<pre> ~n ",
+			       [Class, Error])), []),    
     {ok, State};
 
 handle_event({warning, {ts_parse_error, _TsString}}, State) ->
