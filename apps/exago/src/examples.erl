@@ -159,17 +159,20 @@ conf_etc_sms(FilePre) ->
 	       {session_id, [3]},
 	       {timestamp, [2]},
 	       {abstract_value, [filename]}],
- 
+	      
+
 	      [{wildcard, FilePre ++ "ReqSMS.log"},
 	       {session_id, [3]},
 	       {timestamp, [2]},
 	       {abstract_value, [filename]},
 	       {mappings, [{sid, [4], [3]}]}],
-	      
+
 	      [{wildcard, FilePre ++ "AckSMS.log"},   
 	       {session_id, {sid, [3]}},
 	       {timestamp, [2]},
-	       {abstract_value, [filename]}]]},
+	       {abstract_value, [filename]}]	      
+
+	     ]},
      
      {sess_abstr, fun(Trs) ->
 			  lists:map(fun abstr_sms/1,Trs)

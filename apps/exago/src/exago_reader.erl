@@ -83,7 +83,7 @@ build_events_tbl(Tbl, Tbl2, FileName, FileDetails, [Tuple | Data]) ->
     Filter = proplists:get_value(filter, FileDetails, true),
     case eval_cond(Filter, Tuple) of
 	true ->
-	    [TsFormat, Offset, Value, Time, SessId, TrId, FKeys] =
+	    [TsFormat, Offset, Value, Time, SessId, TrId, Mappings] =
 		[proplists:get_value(Key, FileDetails) ||
 		    Key <- [ts_format, offset, abstract_value, timestamp,
 			    session_id, transaction_id, mappings]],
@@ -98,11 +98,11 @@ build_events_tbl(Tbl, Tbl2, FileName, FileDetails, [Tuple | Data]) ->
 			  end,
 	    TheTrId = tuple_values(Tbl, TrId, Tuple, FileName),
 	    TheSessId = tuple_values(Tbl, SessId, Tuple, FileName),
-	    case FKeys of
+	    case Mappings of
 		undefined ->
-		    no_fkeys;
+		    no_mappings;
 		[] ->
-		    no_fkeys;
+		    no_mappings;
 		_ ->
 		    lists:foreach(fun({Id, FromFlds, ToFlds}) ->
 					  FromValue = tuple_values(Tbl, FromFlds, Tuple, FileName),
@@ -131,9 +131,8 @@ build_events_tbl(Tbl, Tbl2, FileName, FileDetails, [Tuple | Data]) ->
 						  end;
 					      false ->
 						  ok
-					  end
-				  
-				  end, FKeys)
+					  end				  
+				  end, Mappings)
 	    end,
 	    insert_record(Tbl, Tbl2, TheTrId, TheSessId, TheTime, TheValue);
 	_ ->

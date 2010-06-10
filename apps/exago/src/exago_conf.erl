@@ -152,14 +152,13 @@ validate_filespec(FileSpec) ->
 -spec sort_file_conf(Conf::list()) -> list().
 sort_file_conf(Conf) ->
     Files = proplists:get_value(files, Conf),
-    SortedFiles = sort_fileconf(Files),
-    proplists:expand([{files, SortedFiles}], Conf).
-
+    SortedFiles = sort_fileconf(Files),    
+    [{files, SortedFiles} | proplists:delete(files, Conf)].
 
 %% @spec sort_fileconf(FileConfList::list(list())) -> list(list())
 %% @doc Topologically sorts the file configurations graph,
 %%      where the nodes are file specifications and the
-%%      the edges are the foreign key relations between them.
+%%      the edges are the relations between them defined by the mappings.
 -spec sort_fileconf(list(list())) -> list(list()).
 sort_fileconf(FileConfList) ->
     TaggedList = tag_fileconfs(FileConfList),
@@ -207,13 +206,13 @@ pre(FileConf) ->
 			proplists:get_all_values(session_id, FileConf),
 			proplists:get_all_values(timestamp, FileConf),
 			proplists:get_all_values(abstract_value, FileConf),
-			proplists:get_all_values(foreign_keys, FileConf)]]).
+			proplists:get_all_values(mappings, FileConf)]]).
 
-pre2({Id, _Aggr, FKey}) when is_atom(Id) ->
-    pre2(FKey);
+pre2({Id, From, To}) when is_atom(Id) ->
+    pre2(From) ++ pre2(To);
 
-pre2({Id, FKey})  ->
-    [Id | pre2(FKey)];
+pre2({Id, From})  ->
+    [Id | pre2(From)];
 
 pre2(List) when is_list(List) ->
     [pre2(X) || X <- List];
@@ -231,14 +230,14 @@ pre2(none) ->
 %% @doc Returns the outbound edges for a node in the fileconf graph
 -spec succ(list()) -> list(atom()).
 succ(FileConf) ->
-    case proplists:is_defined(foreign_keys, FileConf) of
+    case proplists:is_defined(mappings, FileConf) of
 	true ->
-	    [succ2(X) || X <- proplists:get_value(foreign_keys, FileConf)];
+	    [succ2(X) || X <- proplists:get_value(mappings, FileConf)];
 	false ->
 	    []
     end.
 
-succ2({Id, _Aggr, _FKey}) when is_atom(Id)->
+succ2({Id, _From, _To}) when is_atom(Id)->
     Id.
 
 %%%

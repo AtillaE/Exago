@@ -64,7 +64,7 @@ abstract(Tbl, Tbl2, AbstrFun, NewKeyPos) ->
 %% NewKeyPos describes by which field we are going to aggregate
 %% in the next step. Currently we support only 2 abstraction levels
 %% (sessions and transactions), so the possible valid values
-%% for NewKeyPos are sess_id, trans_id.
+%% for NewKeyPos are current and sess_id.
     exago_utils:ets_parmap_to_ets(
       fun(EventsWithKey) ->
 	      {[Key | _], EventsWithSessId} = lists:unzip(EventsWithKey),

@@ -182,9 +182,9 @@ handle_event({warning, {nondet_map, Id, Pairs}}, State) ->
 				 [Id, Pairs])), []),
     {ok, State};
 
-handle_event({warning, {undef_map, Id, TheFKey}}, State) ->
+handle_event({warning, {undef_map, Id, FromValue}}, State) ->
     write(State, ?WARNING(to_str("Mapping ~p not defined on ~p ~n",
-				 [Id, TheFKey])), []),
+				 [Id, FromValue])), []),
     {ok, State};
 
 handle_event({warning, {ts_parse_error, _TsString}}, State) ->

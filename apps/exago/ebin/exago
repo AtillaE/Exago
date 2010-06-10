@@ -13,11 +13,6 @@ end),
 
 main(_) ->
     usage().
-        
-
-start_shell() ->
-    process_flag(trap_exit, true),
-    link(shell:start()).
 
 wait_for_exit() ->
     receive
