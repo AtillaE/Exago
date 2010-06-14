@@ -60,9 +60,9 @@ run(Conf) ->
 	    io:format("Reading and resolving log entries..."),
 	    
 	    case (catch timer:tc(exago_reader, read_files, [SortedConf])) of
-		{TRead, {ok, {Tbl, Tbl2}}} ->
+		{TRead, {ok, {Tbl, Tbl2}, {TWBegin, TWEnd}}} ->
 		    io:format("done. (~p)\n", [TRead]),
-		    
+	    
 		    io:format("Structuring transactions..."),
 		    TrAbstrFun = exago_conf:get_trans_abstrfun(SortedConf),
 		    {TStructTrans, {ok, Tbl2}} = 
@@ -107,7 +107,8 @@ run(Conf) ->
 		    end;
 		{_TRead, Error} ->
 		    io:format("fail!\n"),
-		    io:format(" See report for details!\n"),
+		    io:format(" Details: ~p\n", [Error]),
+		    io:format(" See report for more details!\n"),
 		    exago_events:e_stop_report(),
 		    Error	    
 	    end;

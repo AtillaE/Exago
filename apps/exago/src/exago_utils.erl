@@ -101,10 +101,10 @@ ets_parmap_wait(I,Tbl,Tbl2) ->
             ets_parmap_wait(I-1,Tbl,Tbl2)
     end.
 
--spec ts_diff({{tuple(),tuple()},integer()} | list(),
-	      {{tuple(),tuple()},integer()}| list()) -> 
-   integer().
-ts_diff({TsString1}, {TsString2}) ->
+-spec ts_diff({{tuple(),tuple()},integer()} | {list()} | term(),
+	      {{tuple(),tuple()},integer()} | {list()} | term()) -> integer().
+ts_diff({TsString1}, {TsString2})
+  when is_list(TsString1) and is_list(TsString2) ->
     if
 	TsString1 == TsString2 ->
 	    0;
@@ -114,7 +114,9 @@ ts_diff({TsString1}, {TsString2}) ->
 	    -1
     end;
 
-ts_diff({DateTime1, MicroSec1}, {DateTime2, MicroSec2}) ->
+ts_diff({DateTime1, MicroSec1}, {DateTime2, MicroSec2})
+  when is_tuple(DateTime1) and is_integer(MicroSec1) and
+       is_tuple(DateTime2) and is_integer(MicroSec2) ->
     (calendar:datetime_to_gregorian_seconds(DateTime2) -
      calendar:datetime_to_gregorian_seconds(DateTime1)) * 1000000
 	+ (MicroSec2 - MicroSec1);

@@ -59,7 +59,15 @@ read_files(Conf) ->
 	      read_file(Tbl, Tbl2, FileName, FileDetailsProplist)
       end, exago_conf:get_files(Conf)),
     ets:match_delete(Tbl, {{'$mapping', '_', '_'}, '_'}),
-    {ok, {Tbl, Tbl2}}.
+    {TWBegin, TWEnd} =
+	case ets:lookup(Tbl, '$timewindow') of
+	    [{'$timewindow', TWBegin_, TWEnd_}] ->
+		{TWBegin_, TWEnd_};
+	    [] ->
+		{undefined, undefined}
+	end,					    
+    ets:delete(Tbl, '$timewindow'),
+    {ok, {Tbl, Tbl2}, {TWBegin, TWEnd}}.
 
 %% @spec read_file(Tbl::tid(), Tbl2::tid(), File::string(),
 %%                 FileDetails::list()) -> TrTbl
@@ -76,7 +84,9 @@ read_file(Tbl, Tbl2, FileName, FileDetails) ->
 %%                        Data::list(tuple())) -> {Tbl::tid(), Tbl2::tid()}
 %% @doc Builds the events table, extracts the specified values
 %%      and resolves the relations. Events with transaction id
-%%      will be put into the first table, events w/o into the second
+%%      will be put into the first table, events w/o into the second.
+%%      During the parsing, it will also find the earliest and
+%%      the latest timestamp.
 -spec build_events_tbl(tid(), tid(), string(), list(), list(tuple())) -> {tid(), tid()}.
 build_events_tbl(Tbl, Tbl2, _FileName, _FileDetails, []) ->
     {Tbl, Tbl2};
@@ -88,17 +98,32 @@ build_events_tbl(Tbl, Tbl2, FileName, FileDetails, [Tuple | Data]) ->
 		[proplists:get_value(Key, FileDetails) ||
 		    Key <- [ts_format, offset, abstract_value, timestamp,
 			    session_id, transaction_id, mappings]],
+	    % Extracting the abstract values
 	    TheValue = tuple_values(Tbl, Value, Tuple, FileName),
+	    % Extracting the timestamp
 	    TheTime = case Time of
 			  undefined -> no_timestamp;
 			  []   -> no_timestamp;
 			  _  ->
 			      parse_ts(
 				tuple_values(Tbl, Time, Tuple, FileName),
-				       TsFormat, Offset)
-			  end,
+				TsFormat, Offset)
+		      end,
+	    % Updating the timestamp boundaries
+	    case {TsFormat, TheTime} of
+		{noparse, _} ->
+		    no_tw_update;
+		{_, parse_error} ->
+		    no_tw_update;
+		{_, no_timestamp} ->
+		    no_tw_update;
+		_ ->
+		    update_timewindow(Tbl, TheTime)
+	    end,
+	    % Extracting the ids
 	    TheTrId = tuple_values(Tbl, TrId, Tuple, FileName),
 	    TheSessId = tuple_values(Tbl, SessId, Tuple, FileName),
+	    % Inserting mappings
 	    case Mappings of
 		undefined ->
 		    no_mappings;
@@ -135,12 +160,32 @@ build_events_tbl(Tbl, Tbl2, FileName, FileDetails, [Tuple | Data]) ->
 					  end				  
 				  end, Mappings)
 	    end,
+	    % insert the extracted values
 	    insert_record(Tbl, Tbl2, TheTrId, TheSessId, TheTime, TheValue);
 	_ ->
 	    ok
     end,
     build_events_tbl(Tbl, Tbl2, FileName, FileDetails, Data).
 
+%% @doc updates the boundaries of the time window if necessary
+update_timewindow(Tbl, TheTime) ->
+    case ets:lookup(Tbl, '$timewindow') of
+	[{'$timewindow', TWBegin, TWEnd}] ->
+	    UpdateBegin = exago_utils:ts_diff(TheTime, TWBegin) > 0,
+	    UpdateEnd = exago_utils:ts_diff(TWEnd, TheTime) > 0,
+	    if  UpdateBegin ->
+		    ets:delete(Tbl, '$timewindow'),
+		    ets:insert(Tbl, {'$timewindow', TheTime, TWEnd});
+		UpdateEnd ->
+		    ets:delete(Tbl, '$timewindow'),
+		    ets:insert(Tbl, {'$timewindow', TWBegin, TheTime});
+		true ->
+		    no_tw_update
+	    end;
+	[] -> 
+	    ets:insert(Tbl, {'$timewindow', TheTime, TheTime})
+    end.
+       
 lookup_mapping(Tbl, {Id, FromValue}) ->
     case ets:lookup(Tbl, {'$mapping', Id, FromValue}) of
         [{_, ToValue}] ->
