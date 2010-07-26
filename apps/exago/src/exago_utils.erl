@@ -37,7 +37,7 @@
 	 ets_parmap_to_ets/3,
 	 ets_map_to_ets/2,
          ets_map/2,
-	 ts_diff/2]).
+	 convert_datetime/1, add_datetime/2, ts_diff/2]).
 
 %% @spec ets_map_to_ets(Fun::function(),Tbl::tid()) -> Tbl2::tid()
 %% @doc Map function on an ets table, stores the results in another ets table.
@@ -113,7 +113,6 @@ ts_diff({TsString1}, {TsString2})
 	true ->
 	    -1
     end;
-
 ts_diff({DateTime1, MicroSec1}, {DateTime2, MicroSec2})
   when is_tuple(DateTime1) and is_integer(MicroSec1) and
        is_tuple(DateTime2) and is_integer(MicroSec2) ->
@@ -122,4 +121,36 @@ ts_diff({DateTime1, MicroSec1}, {DateTime2, MicroSec2})
 	+ (MicroSec2 - MicroSec1);
 ts_diff(_,_) ->
     0.
+
+
+% internally time values (timestamps, offsets) are represented using the format
+% {{{Year, Month, Day}, {Hour, Min, Sec}}, MicroSec}
+convert_datetime({{Year, Month, Day}, {Hour, Min, Sec}}) ->
+    Sec2 = trunc(Sec),
+    MicroSec = (Sec - Sec2) * 1000000,
+    {{{Year, Month, Day}, {Hour, Min, Sec2}}, MicroSec};
+convert_datetime({{{Year, Month, Day}, {Hour, Min, Sec}}, MicroSec}) ->
+    {{{Year, Month, Day}, {Hour, Min, Sec}}, MicroSec}.
+
+
+%% TODO: refactor code duplication with add_offset
+%% TODO: should handle day and month 'overflows'
+add_datetime({{{Year1, Month1, Day1}, {Hour1, Min1, Sec1}}, MicroSec1},
+	 {{{Year2, Month2, Day2}, {Hour2, Min2, Sec2}}, MicroSec2}) ->
+    MSSum = MicroSec1 + MicroSec2,
+    MicroSec = MSSum rem 1000000,
+    MSDiv = MSSum div 1000000,
+    SecSum = Sec1 + Sec2 + MSDiv,
+    Sec = SecSum rem 60,
+    SecDiv = SecSum div 60,
+    MinSum = Min1 + Min2 + SecDiv,
+    Min = MinSum rem 60,
+    MinDiv = MinSum div 60,
+    HourSum = Hour1 + Hour2 + MinDiv,
+    Hour = HourSum rem 60,
+    HourDiv = HourSum div 60,
+    Day = Day1 + Day2 + HourDiv,
+    Month = Month1 + Month2,
+    Year = Year1 + Year2,
+    {{{Year, Month, Day}, {Hour, Min, Sec}}, MicroSec}.
 

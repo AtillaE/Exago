@@ -176,7 +176,7 @@ conf_etc_sms(FilePre) ->
 	       {abstract_value, [filename]}]	      
 
 	     ]},
-     
+     %{sess_length, {{0,0,0},{0,1,0}}},
      {sess_abstr, fun(Trs) ->
 			  lists:map(fun abstr_sms/1,Trs)
 		  end}].

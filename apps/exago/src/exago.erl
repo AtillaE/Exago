@@ -97,7 +97,8 @@ run(Conf) ->
  		    
 			    exago_events:e_section("Failing sessions:"),
 			    io:format("Generating session reports and cleaning up..."),
-			    gen_sess_reports(ResultTbl, AbstrSessTbl, Spec),
+			    gen_sess_reports(ResultTbl, AbstrSessTbl,
+					     {TWBegin, TWEnd}, Spec),
 			    ets:delete(Tbl),
 			    ets:delete(Tbl2),
 			    ets:delete(AbstrSessTbl),
@@ -122,13 +123,13 @@ run(Conf) ->
 	    {invalid_conf, Error}
     end.
 
-gen_sess_reports(ResultTbl, SessionTbl, Spec) ->
+gen_sess_reports(ResultTbl, SessionTbl, {TWBegin, TWEnd}, Spec) ->
     exago_utils:ets_map(fun({SessionId, SessionRes}) ->
 				report_fun({SessionId, SessionRes},
-					   SessionTbl, Spec)
+					   SessionTbl, {TWBegin, TWEnd}, Spec)
 			end, ResultTbl).
 
-report_fun({SessionId, SessionRes}, SessionTbl, Spec) ->
+report_fun({SessionId, SessionRes}, SessionTbl, {TWBegin, TWEnd}, Spec) ->
     case SessionRes of
         {passed, _N} ->
             ok;
@@ -136,5 +137,23 @@ report_fun({SessionId, SessionRes}, SessionTbl, Spec) ->
             {[SessionId | _], AbstrEvents} =
 		lists:unzip(ets:lookup(SessionTbl, SessionId)),
 	    {AbstrEvents2, _}  = lists:unzip(AbstrEvents),
-	    exago_events:e_sm_info(SessionId, Spec, Reason, AbstrEvents2)
+	    MaybeIncomplete = maybe_incomplete(AbstrEvents2, {TWBegin, TWEnd}, Spec),
+	    exago_events:e_sm_info(SessionId, AbstrEvents2,
+				   {Reason, MaybeIncomplete},
+				   Spec)
     end.
+
+maybe_incomplete(AbstrEvents, {TWBegin, TWEnd}, Spec) ->
+    SessionLength = exago_conf:get_session_length(Spec),
+    FirstEvent = hd(AbstrEvents),
+    LastEvent = hd(lists:reverse(AbstrEvents)),
+    {FirstTimeStamp, _} = FirstEvent,
+    {LastTimeStamp, _} = LastEvent,
+    
+    TooEarly = exago_utils:ts_diff(exago_utils:add_datetime(TWBegin, SessionLength),
+				   FirstTimeStamp) < 0,
+    TooLate = exago_utils:ts_diff(TWEnd,
+				  exago_utils:add_datetime(LastTimeStamp, SessionLength)) < 0,
+    
+    TooEarly orelse TooLate.
+   

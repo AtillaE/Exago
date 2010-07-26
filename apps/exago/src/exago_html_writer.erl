@@ -104,8 +104,9 @@ handle_event({control, {section, SectionName}}, State) ->
 
 %%Session data - formats failure reasons
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-handle_event({session_info, {info, SessionId, Specification,
-			     FailDetails, AbsCommands}}, State) ->
+handle_event({session_info, {info, SessionId, AbsEvents,
+			     {FailDetails, MaybeIncomplete},
+			     Specification}}, State) ->
     
     {Reason, LastState, LastTransIndex, LastTrans} = FailDetails,
     
@@ -123,8 +124,16 @@ handle_event({session_info, {info, SessionId, Specification,
     
     io:format(File, ?HTML_HEADER("Failing session "
 				 ++ term_to_filename(SessionId)), []),
-    io:format(File, ?HEADING(to_str("Failing session ~p", [SessionId])), []),
     
+    io:format(File, ?HEADING(to_str("Failing session ~p", [SessionId])), []),
+        case MaybeIncomplete of
+	true ->
+		io:format(File, "NOTE: session is probably incomplete,"
+			        "result might be false negative", []);
+	false ->
+	    ok
+    end,    
+
     
     io:format(File, "<p>" ++ CallBackMod:message(FailDetails) ++"</p>", []),
     io:format(File, "The faulty abstract event: <pre>~p</pre>\n",[LastTrans]),
@@ -143,7 +152,7 @@ handle_event({session_info, {info, SessionId, Specification,
 					  "<pre>    ~p    </pre>\n", [X])
 			end,
 			Acc + 1
-		end, 1, AbsCommands),    
+		end, 1, AbsEvents),    
 
     io:format(File,?HEADING("Abstract model"), []),    
     case ets:lookup(State#state.vis_table, LastState) of
@@ -170,8 +179,13 @@ handle_event({session_info, {info, SessionId, Specification,
     file:close(File),
     
     write(State, "<a href=\"" ++ ?SUBDIR ++ "/" ++ SessionPrefix ++ ".html\">"
-	   "~p failed: ~p</a><br>~n", [SessionPrefix, Reason]),
-    
+	   "~p failed: ~p</a>", [SessionPrefix, Reason]),
+    case MaybeIncomplete of
+	true ->
+	    write(State, " <i>(incomplete)<i><br>~n", []);
+	false ->
+	    write(State, " <br>~n", [])
+    end,    
     {ok, State};
 
 handle_event({info, {info, Msg}}, State) ->

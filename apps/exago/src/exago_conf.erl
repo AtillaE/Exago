@@ -41,6 +41,7 @@
          get_name/1, get_files/1,
          get_trans_abstrfun/1,
          get_sess_abstrfun/1,
+	 get_session_length/1,
          get_spec/1]).
 
 -include("exago_conf.hrl").
@@ -50,7 +51,7 @@
 %% @todo add more conditions and include the reason for failure in the report
 -spec validate(list()) -> true | false.
 validate(Conf) when is_list(Conf) ->
-    ValidKeys = [name, base_dir, ts_format, files,
+    ValidKeys = [name, base_dir, ts_format, files, sess_length,
 		 trans_abstr, sess_abstr, specification],
     PropValidKeys = lists:foldl(fun(Key, Res) ->
 					Res andalso lists:member(Key, ValidKeys)
@@ -301,6 +302,13 @@ get_trans_abstrfun(Conf) ->
 -spec get_sess_abstrfun(Conf::list())-> function().
 get_sess_abstrfun(Conf) ->
     proplists:get_value(sess_abstr, Conf, ?DEFAULT_SESS_ABSTR).
+
+%% @spec get_session_length(Conf::list) -> tuple()
+%% @doc Returns the expected length of a session
+-spec get_session_length(Conf::list()) -> tuple().
+get_session_length(Conf) ->
+    proplists:get_value(sess_length, Conf, {{{0, 0, 0}, {0, 0, 0}}, 0}).
+
 
 %% @spec get_spec(Conf::list) -> list()
 %% @doc Returns the state machine specification

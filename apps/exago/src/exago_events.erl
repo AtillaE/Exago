@@ -104,9 +104,9 @@ e_section(Name) ->
 
 %% @doc information about the current session
 -spec e_sm_info(term(),term(),term(),term()) -> term().
-e_sm_info(SessionId, Specification, Reason, AbsCommands) ->
-    send({session_info, {info, SessionId, Specification,
-			 Reason, AbsCommands}}).
+e_sm_info(SessionId, AbsEvents, Reason, Specification) ->
+    send({session_info, {info, SessionId, AbsEvents,
+			 Reason, Specification}}).
 
 %% @doc non deterministic mapping
 -spec e_nondet_map(atom(), term()) -> term().
