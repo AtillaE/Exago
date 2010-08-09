@@ -48,56 +48,56 @@
 -spec read_files(list()) -> tid().
 read_files(Conf) ->
     % ETS table to store events to abstract, and temporary mapping information
-    Tbl  = ets:new(abstr_event_tbl, [duplicate_bag, public]),
-    Tbl2 = ets:new(abstr_event_tbl_2, [duplicate_bag, public]),
+    Tbl   = ets:new(abstr_event_tbl, [duplicate_bag, public]),
+    Tbl2  = ets:new(abstr_event_tbl_2, [duplicate_bag, public]),
+    StTbl = ets:new(stream_info_tbl, [duplicate_bag, public]),
     Files = exago_conf:get_files(Conf),
     
     [exago_events:e_info(lists:flatten(io_lib:format("  ~p", [X])))
      || X <- Files],
+
     lists:foreach(
       fun({FileName, FileDetailsProplist}) ->
-	      read_file(Tbl, Tbl2, FileName, FileDetailsProplist)
+	      read_file(Tbl, Tbl2, StTbl, FileName, FileDetailsProplist)
       end, exago_conf:get_files(Conf)),
-    ets:match_delete(Tbl, {{'$mapping', '_', '_'}, '_'}),
-    {TWBegin, TWEnd} =
-	case ets:lookup(Tbl, '$timewindow') of
-	    [{'$timewindow', TWBegin_, TWEnd_}] ->
-		{TWBegin_, TWEnd_};
-	    [] ->
-		{undefined, undefined}
-	end,					    
-    ets:delete(Tbl, '$timewindow'),
-    {ok, {Tbl, Tbl2}, {TWBegin, TWEnd}}.
 
-%% @spec read_file(Tbl::tid(), Tbl2::tid(), File::string(),
-%%                 FileDetails::list()) -> TrTbl
+    ets:match_delete(Tbl, {{'$mapping', '_', '_'}, '_'}),
+
+    {ok, {Tbl, Tbl2}, StTbl}.
+
+%% @spec read_file(Tbl::tid(), Tbl2::tid(), StTbl::tid(),
+%%                 File::string(), FileDetails::list()) -> {tid(), tid(), tid()}
 %% @doc Reads and parses a log file
--spec read_file(tid(), tid(), string(), list()) -> {tid(), tid()}.
-read_file(Tbl, Tbl2, FileName, FileDetails) ->
+-spec read_file(tid(), tid(), tid(), string(), list()) -> {tid(), tid(), tid()}.
+read_file(Tbl, Tbl2, StTbl, FileName, FileDetails) ->
     ParseFun = proplists:get_value(parse_fun, FileDetails, csv),
     ParseOpts = proplists:get_value(parse_opts, FileDetails),
     Data = parse_file(FileName, ParseFun, ParseOpts),
-    build_events_tbl(Tbl, Tbl2, FileName, FileDetails, Data).
+    build_events_tbl(Tbl, Tbl2, StTbl, FileName, FileDetails, Data).
 
-%% @spec build_events_tbl(Tbl::tid(), Tbl2::tid(),
+%% @spec build_events_tbl(Tbl::tid(), Tbl2::tid(), StTbl::tid(),
 %%                        FileName::string(), FileDetails::list(),
 %%                        Data::list(tuple())) -> {Tbl::tid(), Tbl2::tid()}
 %% @doc Builds the events table, extracts the specified values
 %%      and resolves the relations. Events with transaction id
 %%      will be put into the first table, events w/o into the second.
 %%      During the parsing, it will also find the earliest and
-%%      the latest timestamp.
--spec build_events_tbl(tid(), tid(), string(), list(), list(tuple())) -> {tid(), tid()}.
-build_events_tbl(Tbl, Tbl2, _FileName, _FileDetails, []) ->
-    {Tbl, Tbl2};
-build_events_tbl(Tbl, Tbl2, FileName, FileDetails, [Tuple | Data]) ->
+%%      the latest timestamp and stores stream pause/resume events.
+-spec build_events_tbl(tid(), tid(), tid(), string(), list(), list(tuple())) -> {tid(), tid()}.
+build_events_tbl(Tbl, Tbl2, StTbl, _FileName, _FileDetails, []) ->
+    {Tbl, Tbl2, StTbl};
+build_events_tbl(Tbl, Tbl2, StTbl, FileName, FileDetails, [Tuple | Data]) ->
     Filter = proplists:get_value(filter, FileDetails, true),
     case eval_cond(Filter, Tuple) of
 	true ->
-	    [TsFormat, Offset, Value, Time, SessId, TrId, Mappings] =
+            [TsFormat, Offset, Value, Time, SessId, TrId, Mappings,
+             StreamPause, StreamResume] =
 		[proplists:get_value(Key, FileDetails) ||
 		    Key <- [ts_format, offset, abstract_value, timestamp,
-			    session_id, transaction_id, mappings]],
+			    session_id, transaction_id, mappings,
+                            stream_pause, stream_resume]],
+            
+
 	    % Extracting the abstract values
 	    TheValue = tuple_values(Tbl, Value, Tuple, FileName),
 	    % Extracting the timestamp
@@ -120,6 +120,43 @@ build_events_tbl(Tbl, Tbl2, FileName, FileDetails, [Tuple | Data]) ->
 		_ ->
 		    update_timewindow(Tbl, TheTime)
 	    end,
+
+            % Inserting information into stream info table
+            case StreamPause of
+                [] ->
+                    no_stream_pause;
+                undefined ->
+                    no_stream_pause;
+                _ -> 
+                    lists:foreach(
+                      fun({StreamId, Cond}) ->
+                              case eval_cond(Cond, Tuple) of
+                                  true ->
+                                      insert_stream_info(StTbl, TheTime, 
+                                                         pause, StreamId);
+                                  false ->
+                                      ok
+                              end
+                      end, StreamPause)
+            end,            
+            case StreamResume of
+                [] ->
+                    no_stream_resume;
+                undefined ->
+                    no_stream_resume;
+                _ ->
+                    lists:foreach(
+                      fun({StreamId, Cond}) ->
+                              case eval_cond(Cond, Tuple) of
+                                  true ->
+                                      insert_stream_info(StTbl, TheTime, 
+                                                         resume, StreamId);
+                                  false ->
+                                      ok
+                              end
+                      end, StreamResume)
+            end,            
+
 	    % Extracting the ids
 	    TheTrId = tuple_values(Tbl, TrId, Tuple, FileName),
 	    TheSessId = tuple_values(Tbl, SessId, Tuple, FileName),
@@ -130,60 +167,62 @@ build_events_tbl(Tbl, Tbl2, FileName, FileDetails, [Tuple | Data]) ->
 		[] ->
 		    no_mappings;
 		_ ->
-		    lists:foreach(fun({Id, FromFlds, ToFlds}) ->
-					  FromValue = tuple_values(Tbl, FromFlds, Tuple, FileName),
-					  case ToFlds of
-					      transaction_id ->
-						  insert_mapping(Tbl, Id, FromValue, TheTrId);
-					      session_id ->
-						  insert_mapping(Tbl, Id, FromValue, TheSessId);
-					      _ ->
-						  ToValue =
-						      tuple_values(Tbl, ToFlds, Tuple, FileName),
-						  insert_mapping(Tbl, Id, FromValue, ToValue)
-					  end;
-				     ({Id, FromFlds, ToFlds, Cond}) ->
-					  case _CondRes = eval_cond(Cond, Tuple) of
-					      true ->
-						  FromValue = tuple_values(Tbl, FromFlds, Tuple, FileName),
-						  case ToFlds of
-						      transaction_id ->
-							  insert_mapping(Tbl, Id, FromValue, TheTrId);
-						      session_id ->
-							  insert_mapping(Tbl, Id, FromValue, TheSessId);
-						      _ ->
-							  ToValue = tuple_values(Tbl, ToFlds, Tuple, FileName),
-							  insert_mapping(Tbl, Id, FromValue, ToValue)
-						  end;
-					      false ->
-						  ok
-					  end				  
-				  end, Mappings)
+                    InsertMapping = 
+                        fun(Id, FromFlds, ToFlds) ->
+                                FromValue = tuple_values(Tbl, FromFlds, 
+                                                         Tuple, FileName),
+                                case ToFlds of
+                                    transaction_id ->
+                                        insert_mapping(Tbl, Id, FromValue, 
+                                                       TheTrId);
+                                    session_id ->
+                                        insert_mapping(Tbl, Id, FromValue, 
+                                                       TheSessId);
+                                    _ ->
+                                        ToValue =
+                                            tuple_values(Tbl, ToFlds, 
+                                                         Tuple, FileName),
+                                        insert_mapping(Tbl, Id, FromValue, 
+                                                       ToValue)
+                                end
+                        end,
+                    
+		    lists:foreach(
+                      fun({Id, FromFlds, ToFlds}) ->
+                              InsertMapping(Id, FromFlds, ToFlds);
+                         ({Id, FromFlds, ToFlds, Cond}) ->
+                              case eval_cond(Cond, Tuple) of
+                                  true ->
+                                      InsertMapping(Id, FromFlds, ToFlds);
+                                  false ->
+                                      ok
+                              end				  
+                      end, Mappings)
 	    end,
 	    % insert the extracted values
 	    insert_record(Tbl, Tbl2, TheTrId, TheSessId, TheTime, TheValue);
 	_ ->
 	    ok
     end,
-    build_events_tbl(Tbl, Tbl2, FileName, FileDetails, Data).
+    build_events_tbl(Tbl, Tbl2, StTbl, FileName, FileDetails, Data).
 
 %% @doc updates the boundaries of the time window if necessary
-update_timewindow(Tbl, TheTime) ->
-    case ets:lookup(Tbl, '$timewindow') of
+update_timewindow(StTbl, TheTime) ->
+    case ets:lookup(StTbl, '$timewindow') of
 	[{'$timewindow', TWBegin, TWEnd}] ->
 	    UpdateBegin = exago_utils:ts_diff(TheTime, TWBegin) > 0,
 	    UpdateEnd = exago_utils:ts_diff(TWEnd, TheTime) > 0,
 	    if  UpdateBegin ->
-		    ets:delete(Tbl, '$timewindow'),
-		    ets:insert(Tbl, {'$timewindow', TheTime, TWEnd});
+		    ets:delete(StTbl, '$timewindow'),
+		    ets:insert(StTbl, {'$timewindow', TheTime, TWEnd});
 		UpdateEnd ->
-		    ets:delete(Tbl, '$timewindow'),
-		    ets:insert(Tbl, {'$timewindow', TWBegin, TheTime});
+		    ets:delete(StTbl, '$timewindow'),
+		    ets:insert(StTbl, {'$timewindow', TWBegin, TheTime});
 		true ->
 		    no_tw_update
 	    end;
 	[] -> 
-	    ets:insert(Tbl, {'$timewindow', TheTime, TheTime})
+	    ets:insert(StTbl, {'$timewindow', TheTime, TheTime})
     end.
        
 lookup_mapping(Tbl, {Id, FromValue}) ->
@@ -199,6 +238,10 @@ lookup_mapping(Tbl, {Id, FromValue}) ->
             none
     end.
 
+insert_stream_info(StTbl, TheTime, pause, StId) ->
+    ets:insert(StTbl, {{'$stream', StId}, {TheTime, pause}});
+insert_stream_info(StTbl, TheTime, resume, StId) ->
+    ets:insert(StTbl, {{'$stream', StId}, {TheTime, resume}}).
 insert_mapping(Tbl, Id, FromValue, ToValue) ->
     ets:insert(Tbl, {{'$mapping', Id, FromValue}, ToValue}).
 insert_record(_Tbl, Tbl2, none, TheSessId, TheTime, TheAbstrValue) ->
@@ -206,7 +249,8 @@ insert_record(_Tbl, Tbl2, none, TheSessId, TheTime, TheAbstrValue) ->
 insert_record(Tbl, _Tbl2, TheTrId, TheSessId, TheTime, TheAbstrValue) ->
     ets:insert(Tbl, {TheTrId, {{TheTime, TheAbstrValue}, TheSessId}}).
 
-%% @spec tuple_values(Tbl::tid(),FieldDef::field_def(),Line::tuple(),Src::string()) -> tuple()
+%% @spec tuple_values(Tbl::tid(),FieldDef::field_def(),
+%%                    Line::tuple(),Src::string()) -> tuple()
 %% @doc Extract values from a parsed line and resolves the dependencies
 tuple_values(_Tbl, undefined, _Tuple, _Filename) ->
     none;
@@ -363,7 +407,7 @@ parse_str(Str, ParseFun, ParseOpts) ->
     end.
 
 %% @spec tokens(String::string(), Seperators::string()) ->
-%%           ListOfStrings::list(string())
+%%              ListOfStrings::list(string())
 %% @doc Return a list of tokens seperated by characters in Seperators.
 %%      Unlike the function in the string module,
 %%      it handles empty fields as well.
@@ -508,4 +552,3 @@ add_offset({{{Year, Month, Day}, {Hour, Minute, Second}}, MicroSec}, Offset) ->
     MinDiv = MinSum div 60,
     Hour2 = Hour + MinDiv,
     {{{Year, Month, Day}, {Hour2, Minute2, Second2}}, MicroSec2}.
-

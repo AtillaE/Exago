@@ -60,7 +60,7 @@ run(Conf) ->
 	    io:format("Reading and resolving log entries..."),
 	    
 	    case (catch timer:tc(exago_reader, read_files, [SortedConf])) of
-		{TRead, {ok, {Tbl, Tbl2}, {TWBegin, TWEnd}}} ->
+		{TRead, {ok, {Tbl, Tbl2}, TWTbl}} ->
 		    io:format("done. (~p)\n", [TRead]),
 	    
 		    io:format("Structuring transactions..."),
@@ -98,7 +98,7 @@ run(Conf) ->
 			    exago_events:e_section("Failing sessions:"),
 			    io:format("Generating session reports and cleaning up..."),
 			    gen_sess_reports(ResultTbl, AbstrSessTbl,
-					     {TWBegin, TWEnd}, Spec),
+					     TWTbl, Spec),
 			    ets:delete(Tbl),
 			    ets:delete(Tbl2),
 			    ets:delete(AbstrSessTbl),
@@ -123,13 +123,13 @@ run(Conf) ->
 	    {invalid_conf, Error}
     end.
 
-gen_sess_reports(ResultTbl, SessionTbl, {TWBegin, TWEnd}, Spec) ->
+gen_sess_reports(ResultTbl, SessionTbl, TWTbl, Spec) ->
     exago_utils:ets_map(fun({SessionId, SessionRes}) ->
 				report_fun({SessionId, SessionRes},
-					   SessionTbl, {TWBegin, TWEnd}, Spec)
+					   SessionTbl, TWTbl, Spec)
 			end, ResultTbl).
 
-report_fun({SessionId, SessionRes}, SessionTbl, {TWBegin, TWEnd}, Spec) ->
+report_fun({SessionId, SessionRes}, SessionTbl, TWTbl, Spec) ->
     case SessionRes of
         {passed, _N} ->
             ok;
@@ -137,23 +137,118 @@ report_fun({SessionId, SessionRes}, SessionTbl, {TWBegin, TWEnd}, Spec) ->
             {[SessionId | _], AbstrEvents} =
 		lists:unzip(ets:lookup(SessionTbl, SessionId)),
 	    {AbstrEvents2, _}  = lists:unzip(AbstrEvents),
-	    MaybeIncomplete = maybe_incomplete(AbstrEvents2, {TWBegin, TWEnd}, Spec),
+	    MaybeIncomplete = maybe_incomplete(AbstrEvents2, 
+                                               TWTbl, Spec),
 	    exago_events:e_sm_info(SessionId, AbstrEvents2,
 				   {Reason, MaybeIncomplete},
 				   Spec)
     end.
 
-maybe_incomplete(AbstrEvents, {TWBegin, TWEnd}, Spec) ->
-    SessionLength = exago_conf:get_session_length(Spec),
+
+%% TODO: put timewindow related functions into a new module
+%% Which paradigm to follow, COP (tw gen_server) or FP (pass tw ets id)?
+maybe_incomplete(AbstrEvents, StTbl, Spec) ->
+    {TWBegin, TWEnd} = case ets:lookup(StTbl, '$timewindow') of
+                           [{'$timewindow', TWBegin_, TWEnd_}] ->
+                               {TWBegin_, TWEnd_};
+                           [] ->
+                               {undefined, undefined}
+                       end,
+
+    SessionLength = exago_conf:get_session_length(Spec),    
+
     FirstEvent = hd(AbstrEvents),
     LastEvent = hd(lists:reverse(AbstrEvents)),
     {FirstTimeStamp, _} = FirstEvent,
     {LastTimeStamp, _} = LastEvent,
     
-    TooEarly = exago_utils:ts_diff(exago_utils:add_datetime(TWBegin, SessionLength),
-				   FirstTimeStamp) < 0,
-    TooLate = exago_utils:ts_diff(TWEnd,
-				  exago_utils:add_datetime(LastTimeStamp, SessionLength)) < 0,
+    %% structure intervals
+    Intervals = 
+        exago_utils:ets_map(
+          fun({'$timewindow'}, _) ->
+                  ok;
+             ({'$stream', StreamId}, StreamInfo) ->
+                  {StreamId,
+                   lists:foldl(fun({_TimeStamp, pause},
+                                   [{TsPause, plus_infinity} | Rest]) ->
+                                       %% Trying to pause a paused stream,
+                                       %%  something went wrong here...
+                                       %% But we already expect missing events!
+                                       [{TsPause, plus_infinity} | Rest]; 
+                                  ({TimeStamp, pause}, List) ->
+                                       [{TimeStamp, plus_infinity} | List];
+                                  ({TimeStamp, resume}, []) ->
+                                   {minus_infinity, TimeStamp};
+                                  ({TimeStamp, resume}, 
+                                   [{TsPause, plus_infinity} | Rest]) ->
+                                       [{TsPause, TimeStamp} | Rest];
+                                  ({TimeStamp, resume},
+                                   [{TsPause, _TsResume} | Rest]) ->
+                                       %% Trying to resume an active stream
+                                   %% There might be other missing events
+                                       %%  so we modify the stream interval!
+                                       [{TsPause, TimeStamp} | Rest]
+                               end, 
+                               [], sort_by_time(StreamInfo))}
+          end,
+          StTbl), 
     
-    TooEarly orelse TooLate.
-   
+    FirstTsPlus =
+        exago_utils:add_datetime(FirstTimeStamp, SessionLength),
+    LastTsPlus =
+        exago_utils:add_datetime(LastTimeStamp, SessionLength),
+    Overlaps = fun(TsPause, TsResume) ->
+                       TsPausePlus =
+                           exago_utils:add_datetime(TsPause, SessionLength),
+                       TsResumePlus =
+                           exago_utils:add_datetime(TsResume, SessionLength),
+                       is_intersects({FirstTimeStamp, FirstTsPlus},
+                                     {TsPause, TsResume})
+                           orelse
+                           is_intersects({LastTimeStamp, LastTsPlus},
+                                         {TsPausePlus, TsResumePlus})
+               end,
+    
+    %% we flatten the list since we don't use the stream id's in the report yet
+    EventStreamSuspended = lists:foldl(fun({_StId, {TsPause, TsResume}}, Acc) ->
+                                               Overlaps(TsPause, TsResume) 
+                                                   orelse Acc
+                                       end, false, lists:flatten(Intervals)),
+    
+    TooEarly = 
+        exago_utils:ts_diff(exago_utils:add_datetime(TWBegin, SessionLength),
+                            LastTimeStamp) < 0,
+    TooLate = 
+        exago_utils:ts_diff(TWEnd,
+                            exago_utils:add_datetime(FirstTimeStamp,
+                                                     SessionLength)) < 0,
+    
+    TooEarly orelse TooLate orelse EventStreamSuspended.
+
+%% todo: refactor all the time related functions into a separate module
+%% true if the two intervals have intersection
+is_intersects({Iv1Begin, Iv1End}, {Iv2Begin, Iv2End}) ->
+    (exago_utils:ts_diff(Iv1Begin, Iv2Begin) < 0
+     andalso
+     exago_utils:ts_diff(Iv1Begin, Iv2End) > 0)
+        orelse
+          (exago_utils:ts_diff(Iv1End, Iv2Begin) < 0
+           andalso
+           exago_utils:ts_diff(Iv1End, Iv2End) > 0)
+        orelse
+          (exago_utils:ts_diff(Iv2Begin, Iv1Begin) < 0
+           andalso
+           exago_utils:ts_diff(Iv2Begin, Iv1End) > 0)
+        orelse
+          (exago_utils:ts_diff(Iv2End, Iv1Begin) < 0
+           andalso
+           exago_utils:ts_diff(Iv2End, Iv1End) > 0).
+
+
+%% todo: remove code duplication!!
+-spec sort_by_time(list(tuple())) -> list().
+sort_by_time(Trs) ->
+    lists:sort(fun cmp_time/2, Trs).
+-spec cmp_time(tuple(string()), tuple(string())) -> true | false.
+cmp_time(Trs1, Trs2) ->
+    exago_utils:ts_diff(element(1, Trs1), element(1, Trs2)) > 0.

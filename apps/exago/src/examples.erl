@@ -148,7 +148,10 @@ conf_etc_sms(FilePre) ->
      {files, [[{wildcard, FilePre ++ "Req.log"},
 	       {session_id, [3]},
 	       {timestamp, [2]},
-	       {abstract_value, [filename]}],
+	       {abstract_value, [filename]}
+               %% {stream_pause, {StreamName, Cond}},
+               %% {stream_resume {StreamName, Cond}}
+              ],
 	      
 	      [{wildcard, FilePre ++ "ReqAck.log"},
 	       {parse_fun, fun(Str, _Opts) -> % testing the custom parser function
@@ -161,8 +164,7 @@ conf_etc_sms(FilePre) ->
 	      [{wildcard, FilePre ++ "ReqErr.log"},
 	       {session_id, [3]},
 	       {timestamp, [2]},
-	       {abstract_value, [filename]}],
-	      
+	       {abstract_value, [filename]}],	      
 
 	      [{wildcard, FilePre ++ "ReqSMS.log"},
 	       {session_id, [3]},
