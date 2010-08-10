@@ -118,7 +118,7 @@ build_events_tbl(Tbl, Tbl2, StTbl, FileName, FileDetails, [Tuple | Data]) ->
 		{_, no_timestamp} ->
 		    no_tw_update;
 		_ ->
-		    update_timewindow(Tbl, TheTime)
+		    update_timewindow(StTbl, TheTime)
 	    end,
 
             % Inserting information into stream info table

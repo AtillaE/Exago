@@ -161,13 +161,13 @@ maybe_incomplete(AbstrEvents, StTbl, Spec) ->
     LastEvent = hd(lists:reverse(AbstrEvents)),
     {FirstTimeStamp, _} = FirstEvent,
     {LastTimeStamp, _} = LastEvent,
-    
+
     %% structure intervals
     Intervals = 
         exago_utils:ets_map(
-          fun({'$timewindow'}, _) ->
-                  ok;
-             ({'$stream', StreamId}, StreamInfo) ->
+          fun({'$timewindow', _, _}) ->
+                  '$timewindow';
+             ({{'$stream', StreamId}, StreamInfo}) ->
                   {StreamId,
                    lists:foldl(fun({_TimeStamp, pause},
                                    [{TsPause, plus_infinity} | Rest]) ->
@@ -210,7 +210,8 @@ maybe_incomplete(AbstrEvents, StTbl, Spec) ->
                end,
     
     %% we flatten the list since we don't use the stream id's in the report yet
-    EventStreamSuspended = lists:foldl(fun({_StId, {TsPause, TsResume}}, Acc) ->
+    EventStreamSuspended = lists:foldl(fun('$timewindow', Acc) -> Acc;
+                                          ({_StId, {TsPause, TsResume}}, Acc) ->
                                                Overlaps(TsPause, TsResume) 
                                                    orelse Acc
                                        end, false, lists:flatten(Intervals)),
